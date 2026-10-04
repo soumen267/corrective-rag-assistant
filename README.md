@@ -1,8 +1,32 @@
 # Local Corrective RAG Assistant
 
-A full-stack Retrieval-Augmented Generation (RAG) application that answers questions from a local knowledge base using hybrid retrieval, cross-encoder reranking, corrective retrieval, conversational query rewriting, and local LLM inference.
+A full-stack Retrieval-Augmented Generation (RAG) application for
+question answering over a local document knowledge base.
 
-The application runs locally using Ollama and exposes the RAG pipeline through a FastAPI backend and a lightweight web interface.
+The system combines **semantic vector search and BM25 keyword retrieval**,
+uses **Reciprocal Rank Fusion and cross-encoder reranking**, and implements
+a **corrective RAG workflow with LangGraph** to grade retrieved documents
+and retry retrieval when necessary.
+
+Generation runs locally using **Ollama**, while **FastAPI** exposes the
+backend to a lightweight web interface.
+
+![RAG Assistant](screenshots/rag-assistant.png)
+
+## Highlights
+
+- Hybrid Chroma + BM25 retrieval
+- Reciprocal Rank Fusion (RRF)
+- Cross-encoder reranking
+- Corrective retrieval with LangGraph
+- LLM-based document relevance grading
+- Conversational query rewriting
+- Structured citations with source excerpts
+- Dynamic TXT, Markdown and PDF ingestion
+- Local generation with Ollama
+- FastAPI REST API
+- Web-based chat and document management
+- Retrieval evaluation using Hit@K, MRR and rejection accuracy
 
 ## Features
 
