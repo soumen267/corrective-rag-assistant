@@ -1,0 +1,527 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    background: #f6f7f9;
+    color: #1f2937;
+}
+
+button,
+textarea,
+input {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+
+/* Layout */
+
+.app {
+    display: flex;
+    height: 100vh;
+}
+
+
+/* Sidebar */
+
+.sidebar {
+    width: 300px;
+    background: #111827;
+    color: #ffffff;
+
+    display: flex;
+    flex-direction: column;
+
+    padding: 24px;
+}
+
+.brand {
+    padding-bottom: 24px;
+    border-bottom: 1px solid #374151;
+}
+
+.brand h1 {
+    font-size: 20px;
+}
+
+.brand p {
+    margin-top: 4px;
+    font-size: 13px;
+    color: #9ca3af;
+}
+
+
+/* Health */
+
+.health-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    margin-top: 16px;
+
+    font-size: 13px;
+    color: #d1d5db;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+
+    border-radius: 50%;
+
+    background: #f59e0b;
+}
+
+.status-dot.online {
+    background: #22c55e;
+}
+
+.status-dot.offline {
+    background: #ef4444;
+}
+
+
+/* Sidebar sections */
+
+.sidebar-section {
+    flex: 1;
+
+    margin-top: 24px;
+
+    overflow: hidden;
+
+    display: flex;
+    flex-direction: column;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    margin-bottom: 12px;
+}
+
+.section-header h2 {
+    font-size: 14px;
+    font-weight: 600;
+
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+
+    color: #9ca3af;
+}
+
+.icon-button {
+    border: none;
+    background: transparent;
+
+    color: #d1d5db;
+
+    font-size: 20px;
+}
+
+.document-list {
+    overflow-y: auto;
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    gap: 10px;
+
+    padding: 10px 0;
+
+    border-bottom: 1px solid #1f2937;
+}
+
+.document-info {
+    overflow: hidden;
+}
+
+.document-name {
+    display: block;
+
+    font-size: 14px;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.document-path {
+    display: block;
+
+    margin-top: 3px;
+
+    font-size: 11px;
+    color: #6b7280;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.delete-document {
+    border: none;
+    background: transparent;
+
+    color: #9ca3af;
+
+    font-size: 18px;
+}
+
+.delete-document:hover {
+    color: #ef4444;
+}
+
+
+/* Upload */
+
+.upload-section {
+    padding-top: 20px;
+    border-top: 1px solid #374151;
+}
+
+.upload-help {
+    margin-top: 8px;
+
+    text-align: center;
+
+    font-size: 11px;
+    color: #6b7280;
+}
+
+
+/* Main */
+
+.main {
+    flex: 1;
+
+    display: flex;
+    flex-direction: column;
+
+    min-width: 0;
+}
+
+.topbar {
+    min-height: 82px;
+
+    background: #ffffff;
+
+    border-bottom: 1px solid #e5e7eb;
+
+    padding: 18px 28px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.topbar h2 {
+    font-size: 18px;
+}
+
+.topbar p {
+    margin-top: 4px;
+
+    font-size: 13px;
+    color: #6b7280;
+}
+
+
+/* Buttons */
+
+.secondary-button {
+    padding: 9px 14px;
+
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+
+    background: #ffffff;
+    color: #374151;
+
+    font-size: 13px;
+}
+
+.sidebar .secondary-button {
+    width: 100%;
+
+    background: #1f2937;
+    border-color: #374151;
+
+    color: #ffffff;
+}
+
+.secondary-button:hover {
+    opacity: 0.9;
+}
+
+
+/* Chat */
+
+.chat-messages {
+    flex: 1;
+
+    overflow-y: auto;
+
+    padding: 32px;
+
+    max-width: 1000px;
+    width: 100%;
+
+    margin: 0 auto;
+}
+
+.welcome {
+    text-align: center;
+
+    margin-top: 15vh;
+
+    color: #6b7280;
+}
+
+.welcome h2 {
+    color: #1f2937;
+
+    margin-bottom: 8px;
+}
+
+
+/* Messages */
+
+.message {
+    margin-bottom: 28px;
+}
+
+.message-label {
+    font-size: 12px;
+    font-weight: 700;
+
+    text-transform: uppercase;
+
+    color: #6b7280;
+
+    margin-bottom: 7px;
+}
+
+.message-content {
+    line-height: 1.65;
+
+    white-space: pre-wrap;
+}
+
+.user-message .message-content {
+    background: #e8eefc;
+
+    padding: 14px 16px;
+
+    border-radius: 10px;
+}
+
+.assistant-message .message-content {
+    background: #ffffff;
+
+    border: 1px solid #e5e7eb;
+
+    padding: 16px;
+
+    border-radius: 10px;
+}
+
+
+/* Sources */
+
+.sources {
+    margin-top: 12px;
+}
+
+.source-card {
+    background: #ffffff;
+
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+
+    margin-top: 8px;
+
+    overflow: hidden;
+}
+
+.source-header {
+    width: 100%;
+
+    border: none;
+    background: #f9fafb;
+
+    padding: 11px 14px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    text-align: left;
+}
+
+.source-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.source-score {
+    font-size: 11px;
+    color: #6b7280;
+}
+
+.source-details {
+    display: none;
+
+    padding: 14px;
+
+    border-top: 1px solid #e5e7eb;
+
+    font-size: 13px;
+
+    line-height: 1.5;
+}
+
+.source-details.open {
+    display: block;
+}
+
+.source-meta {
+    margin-bottom: 8px;
+
+    font-size: 11px;
+    color: #6b7280;
+
+    word-break: break-all;
+}
+
+
+/* Form */
+
+.chat-form {
+    background: #ffffff;
+
+    border-top: 1px solid #e5e7eb;
+
+    padding: 18px 28px;
+
+    display: flex;
+    gap: 12px;
+}
+
+.chat-form textarea {
+    flex: 1;
+
+    resize: none;
+
+    min-height: 46px;
+    max-height: 160px;
+
+    padding: 12px 14px;
+
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+
+    outline: none;
+}
+
+.chat-form textarea:focus {
+    border-color: #6b7280;
+}
+
+.send-button {
+    min-width: 90px;
+
+    border: none;
+    border-radius: 8px;
+
+    background: #111827;
+    color: #ffffff;
+
+    padding: 0 20px;
+}
+
+.send-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+
+/* Misc */
+
+.error-message {
+    margin: 0 28px 10px;
+
+    padding: 10px 14px;
+
+    border-radius: 6px;
+
+    background: #fee2e2;
+    color: #991b1b;
+
+    font-size: 13px;
+}
+
+.hidden {
+    display: none;
+}
+
+.muted {
+    color: #6b7280;
+    font-size: 13px;
+}
+
+
+/* Loading */
+
+.typing {
+    color: #6b7280;
+
+    font-style: italic;
+}
+
+
+/* Responsive */
+
+@media (max-width: 768px) {
+
+    .sidebar {
+        display: none;
+    }
+
+    .topbar {
+        padding: 15px;
+    }
+
+    .topbar p {
+        display: none;
+    }
+
+    .chat-messages {
+        padding: 20px 15px;
+    }
+
+    .chat-form {
+        padding: 12px;
+    }
+
+}

@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.local
+.env.*.local
+
+# Local vector database
+vector_store/
+chroma/
+chroma_db/
+
+# Runtime uploaded knowledge-base files
+data/*
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing / cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Build / distribution
+build/
+dist/
+*.egg-info/

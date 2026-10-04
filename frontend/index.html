@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Local RAG Assistant</title>
+
+    <link
+        rel="stylesheet"
+        href="css/style.css"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+
+        <div class="brand">
+            <div>
+                <h1>RAG Assistant</h1>
+                <p>Local Knowledge Base</p>
+            </div>
+
+            <div
+                id="healthStatus"
+                class="health-status"
+            >
+                <span class="status-dot"></span>
+                <span id="healthText">
+                    Checking...
+                </span>
+            </div>
+        </div>
+
+
+        <div class="sidebar-section">
+
+            <div class="section-header">
+                <h2>Knowledge Base</h2>
+
+                <button
+                    id="refreshDocuments"
+                    class="icon-button"
+                    title="Refresh documents"
+                >
+                    ↻
+                </button>
+            </div>
+
+
+            <div
+                id="documentList"
+                class="document-list"
+            >
+                <p class="muted">
+                    Loading documents...
+                </p>
+            </div>
+
+        </div>
+
+
+        <div class="upload-section">
+
+            <input
+                type="file"
+                id="fileInput"
+                accept=".txt,.md,.pdf"
+                hidden
+            >
+
+            <button
+                id="uploadButton"
+                class="secondary-button"
+            >
+                + Upload Document
+            </button>
+
+            <p class="upload-help">
+                TXT, Markdown or PDF
+            </p>
+
+        </div>
+
+    </aside>
+
+
+    <!-- Main -->
+    <main class="main">
+
+        <header class="topbar">
+
+            <div>
+                <h2>Knowledge Assistant</h2>
+
+                <p>
+                    Ask questions about your indexed documents
+                </p>
+            </div>
+
+
+            <button
+                id="clearChatButton"
+                class="secondary-button"
+            >
+                Clear Conversation
+            </button>
+
+        </header>
+
+
+        <section
+            id="chatMessages"
+            class="chat-messages"
+        >
+
+            <div class="welcome">
+
+                <h2>
+                    Ask your knowledge base
+                </h2>
+
+                <p>
+                    Answers are generated from your
+                    indexed documents using hybrid
+                    retrieval and local AI.
+                </p>
+
+            </div>
+
+        </section>
+
+
+        <div
+            id="errorMessage"
+            class="error-message hidden"
+        ></div>
+
+
+        <form
+            id="chatForm"
+            class="chat-form"
+        >
+
+            <textarea
+                id="questionInput"
+                placeholder="Ask a question..."
+                rows="1"
+                maxlength="2000"
+                required
+            ></textarea>
+
+            <button
+                id="sendButton"
+                type="submit"
+                class="send-button"
+            >
+                Send
+            </button>
+
+        </form>
+
+    </main>
+
+</div>
+
+
+<script src="js/app.js"></script>
+
+</body>
+</html>

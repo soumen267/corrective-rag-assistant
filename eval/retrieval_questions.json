@@ -1,0 +1,46 @@
+[
+    {
+        "question": "What is dependency injection?",
+        "expected_sources": [
+            "data/php/dependency-injection.md"
+        ]
+    },
+    {
+        "question": "How does Laravel middleware work?",
+        "expected_sources": [
+            "data/laravel/middleware.md"
+        ]
+    },
+    {
+        "question": "What tasks can Laravel middleware perform?",
+        "expected_sources": [
+            "data/laravel/middleware.md"
+        ]
+    },
+    {
+        "question": "Why do MySQL indexes improve query performance?",
+        "expected_sources": [
+            "data/mysql/indexing.md"
+        ]
+    },
+    {
+        "question": "What is the disadvantage of adding indexes?",
+        "expected_sources": [
+            "data/mysql/indexing.md"
+        ]
+    },
+    {
+        "question": "What does Laravel's service container do?",
+        "expected_sources": [
+            "data/laravel/laravel.txt"
+        ]
+    },
+    {
+    "question": "How do I cook chicken biriyani?",
+    "expected_sources": []
+    },
+    {
+    "question": "Who won the football match yesterday?",
+    "expected_sources": []
+    }
+]
