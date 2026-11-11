@@ -102,6 +102,7 @@ def print_retrieval_debug(
 
 def retrieve_documents(
     query: str,
+    owner_id: str,
 ) -> list[tuple[Document, float]]:
     """
     Retrieve candidate documents using hybrid search,
@@ -110,6 +111,7 @@ def retrieve_documents(
     hybrid_results = hybrid_search(
         query=query,
         limit=CANDIDATE_LIMIT,
+        owner_id=owner_id,
     )
 
     candidate_documents = [
@@ -130,6 +132,7 @@ def retrieve_documents(
 def ask(
     question: str,
     history: ConversationHistory,
+    owner_id: str,
 ) -> tuple[str, list[Citation]]:
     """
     Rewrite conversational questions, retrieve relevant
@@ -147,6 +150,7 @@ def ask(
     # Step 2: Hybrid retrieval + reranking.
     search_results = retrieve_documents(
         query=retrieval_query,
+        owner_id=owner_id,
     )
 
     print_retrieval_debug(
@@ -287,6 +291,7 @@ def main() -> None:
             answer, citations = ask(
                 question=question,
                 history=history,
+                owner_id="local-cli-user",
             )
 
             print("\nAnswer:")

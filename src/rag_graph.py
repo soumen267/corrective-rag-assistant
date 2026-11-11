@@ -17,6 +17,7 @@ from rag import format_context, retrieve_documents
 class RAGState(TypedDict):
     question: str
     history: ConversationHistory
+    owner_id: str
 
     retrieval_query: str
 
@@ -67,6 +68,7 @@ def retrieve_node(
 
     search_results = retrieve_documents(
         query=retrieval_query,
+        owner_id=state["owner_id"],
     )
 
     print("\n[Graph: Retrieval]")
@@ -208,26 +210,24 @@ def generate_node(
     conversation = history.format_history()
 
     system_prompt = """
-You are a helpful RAG assistant.
+You are a precise document question-answering assistant.
 
-Answer the user's question using only the provided context.
+IMPORTANT RULES:
+1. Answer using ONLY the retrieved context.
+2. Read the retrieved context carefully before answering.
+3. If the context explicitly contains the requested value,
+   return that exact value.
+4. Never say information is missing when it is explicitly
+   present in the context.
+5. Do not unnecessarily paraphrase codes, IDs, names,
+   email addresses, or numbers.
+6. Do not invent information.
+7. Cite the supporting context using [Source N].
+8. If the requested information is genuinely absent,
+   say:
+   "I don't have enough information in the provided documents."
 
-Use the conversation history only to understand the user's current
-question. Factual claims in the answer must come from the retrieved
-context.
-
-Rules:
-- Do not use outside knowledge.
-- Do not make up information.
-- Cite supporting context using [Source N].
-- Use the source number exactly as provided in the context.
-- Do not invent source numbers.
-- If multiple sources support a statement, you may cite multiple
-  sources.
-- If the retrieved context does not contain enough information,
-  say:
-  "I don't have enough information in the provided documents."
-- Keep the answer clear and concise.
+Keep answers short and direct.
 """.strip()
 
     user_prompt = f"""
@@ -370,10 +370,12 @@ rag_graph = build_rag_graph()
 def ask_with_graph(
     question: str,
     history: ConversationHistory,
+    owner_id: str,
 ) -> tuple[str, list[Citation]]:
     initial_state: RAGState = {
         "question": question,
         "history": history,
+        "owner_id": owner_id,
         "retrieval_query": "",
         "search_results": [],
         "relevant_results": [],

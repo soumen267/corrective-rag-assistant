@@ -1,8 +1,14 @@
+import os
+
 from conversation import ConversationHistory
 from rag_graph import ask_with_graph
 
 
 def main() -> None:
+    owner_id = os.getenv("RAG_EVAL_OWNER_ID", "").strip()
+    if not owner_id:
+        raise RuntimeError("Set RAG_EVAL_OWNER_ID to a test account username.")
+
     history = ConversationHistory(
         max_messages=10,
     )
@@ -24,6 +30,7 @@ def main() -> None:
         answer, citations = ask_with_graph(
             question=question,
             history=history,
+            owner_id=owner_id,
         )
 
         print("\nAnswer:")

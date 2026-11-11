@@ -1,8 +1,11 @@
+
+import logging
 from functools import lru_cache
 
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
+logger = logging.getLogger(__name__)
 
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
@@ -12,6 +15,7 @@ def get_reranker() -> CrossEncoder:
     """
     Load the cross-encoder once and reuse it.
     """
+    logger.info("Loading reranker model: %s", RERANKER_MODEL)
     return CrossEncoder(RERANKER_MODEL)
 
 
@@ -23,14 +27,24 @@ def rerank_documents(
     """
     Rerank candidate documents according to their
     relevance to the query.
+
+    Returns:
+        List of (Document, relevance_score) tuples.
     """
-    if not query.strip() or not documents:
+
+    if not query or not query.strip():
+        return []
+
+    if not documents:
+        return []
+
+    if limit <= 0:
         return []
 
     reranker = get_reranker()
 
     pairs = [
-        (query, document.page_content)
+        (query.strip(), document.page_content)
         for document in documents
     ]
 
@@ -42,47 +56,24 @@ def rerank_documents(
         reverse=True,
     )
 
-    return [
+    final_results = [
         (document, float(score))
         for document, score in ranked_results[:limit]
     ]
-if __name__ == "__main__":
-    from hybrid_search import hybrid_search
 
-    query = input("Enter search query: ").strip()
-
-    hybrid_results = hybrid_search(
-        query=query,
-        limit=10,
+    logger.info(
+        "[RERANKER] Candidates=%d Selected=%d",
+        len(documents),
+        len(final_results),
     )
 
-    candidates = [
-        document
-        for document, _score in hybrid_results
-    ]
+    for rank, (document, score) in enumerate(final_results, start=1):
+        logger.debug(
+            "[RERANKER] Rank=%d Score=%.4f Source=%s Chunk=%s",
+            rank,
+            score,
+            document.metadata.get("source"),
+            document.metadata.get("chunk_id"),
+        )
 
-    results = rerank_documents(
-        query=query,
-        documents=candidates,
-        limit=3,
-    )
-
-    print(f"\nQuery: {query}")
-    print("=" * 60)
-
-    if not results:
-        print("No relevant documents found.")
-
-    for index, (document, score) in enumerate(
-        results,
-        start=1,
-    ):
-        print(f"\nResult {index}")
-        print(f"Reranker Score: {score:.4f}")
-        print(f"Source: {document.metadata.get('source')}")
-        print(f"Chunk ID: {document.metadata.get('chunk_id')}")
-
-        print("\nContent:")
-        print(document.page_content)
-
-        print("-" * 60)
+    return final_results

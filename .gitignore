@@ -46,3 +46,7 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+reset_admin_password.py
+test_auth_flow.py
+test_rag_project.py
+P0_PROGRESS.md

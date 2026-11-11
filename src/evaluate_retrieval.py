@@ -1,9 +1,15 @@
+import os
 import json
 from pathlib import Path
 
 from hybrid_search import hybrid_search
 from reranker import rerank_documents
 
+
+
+EVAL_OWNER_ID = os.getenv("RAG_EVAL_OWNER_ID", "").strip()
+if not EVAL_OWNER_ID:
+    raise RuntimeError("Set RAG_EVAL_OWNER_ID to a test account username before evaluation.")
 
 EVALUATION_FILE = Path("eval/retrieval_questions.json")
 CANDIDATE_LIMIT = 10
@@ -25,6 +31,7 @@ def retrieve(question: str):
     hybrid_results = hybrid_search(
         query=question,
         limit=CANDIDATE_LIMIT,
+        owner_id=EVAL_OWNER_ID,
     )
 
     candidate_documents = [
