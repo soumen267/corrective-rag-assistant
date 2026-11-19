@@ -11,7 +11,15 @@ and retry retrieval when necessary.
 Generation runs locally using **Ollama**, while **FastAPI** exposes the
 backend to a lightweight web interface.
 
-![RAG Assistant](screenshots/rag-assistant.png)
+### Screenshots
+
+**Signed-in dashboard** with the per-user knowledge base and document upload:
+
+![Dashboard](screenshots/Dashboard.JPG)
+
+**Question answering** with source citations and reranker relevance scores:
+
+![Question answering with citations](screenshots/RAG.JPG)
 
 ## Highlights
 
