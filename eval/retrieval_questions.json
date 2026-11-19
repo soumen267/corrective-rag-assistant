@@ -1,46 +1,55 @@
 [
-    {
-        "question": "What is dependency injection?",
-        "expected_sources": [
-            "data/php/dependency-injection.md"
-        ]
-    },
-    {
-        "question": "How does Laravel middleware work?",
-        "expected_sources": [
-            "data/laravel/middleware.md"
-        ]
-    },
-    {
-        "question": "What tasks can Laravel middleware perform?",
-        "expected_sources": [
-            "data/laravel/middleware.md"
-        ]
-    },
-    {
-        "question": "Why do MySQL indexes improve query performance?",
-        "expected_sources": [
-            "data/mysql/indexing.md"
-        ]
-    },
-    {
-        "question": "What is the disadvantage of adding indexes?",
-        "expected_sources": [
-            "data/mysql/indexing.md"
-        ]
-    },
-    {
-        "question": "What does Laravel's service container do?",
-        "expected_sources": [
-            "data/laravel/laravel.txt"
-        ]
-    },
-    {
-    "question": "How do I cook chicken biriyani?",
-    "expected_sources": []
-    },
-    {
-    "question": "Who won the football match yesterday?",
-    "expected_sources": []
-    }
+    {"type": "paraphrase", "question": "How can I run code after the HTTP response has already been sent to the browser in Laravel?", "expected_sources": ["laravel-middleware.md"]},
+    {"type": "paraphrase", "question": "Which part of Laravel automatically builds objects by reading constructor type hints?", "expected_sources": ["laravel-service-container.md"]},
+    {"type": "paraphrase", "question": "How do I avoid running one query per row when loading related models?", "expected_sources": ["laravel-eloquent-relationships.md"]},
+    {"type": "paraphrase", "question": "What keeps background job workers alive and how do I make them pick up new code after a deploy?", "expected_sources": ["laravel-queues.md"]},
+    {"type": "paraphrase", "question": "How do I undo the last database schema change in Laravel?", "expected_sources": ["laravel-migrations.md"]},
+    {"type": "paraphrase", "question": "What happens when submitted form data fails validation on a JSON API request?", "expected_sources": ["laravel-validation.md"]},
+    {"type": "paraphrase", "question": "How can I store the result of an expensive computation for ten minutes?", "expected_sources": ["laravel-caching.md"]},
+    {"type": "paraphrase", "question": "Why is constructing collaborators inside a class considered bad for unit testing?", "expected_sources": ["php-dependency-injection.md"]},
+    {"type": "paraphrase", "question": "How does PHP find a class file without manual require statements?", "expected_sources": ["php-composer-autoloading.md"]},
+    {"type": "paraphrase", "question": "How can two traits with the same method name be used in one class?", "expected_sources": ["php-traits-interfaces.md"]},
+    {"type": "paraphrase", "question": "What is the difference between an Error and an Exception in PHP?", "expected_sources": ["php-error-handling.md"]},
+    {"type": "paraphrase", "question": "Why does a query on the last name column still scan the entire table when my index is on first name and last name?", "expected_sources": ["mysql-indexing.md"]},
+    {"type": "paraphrase", "question": "Which isolation level does InnoDB use unless configured otherwise?", "expected_sources": ["mysql-transactions-isolation.md"]},
+    {"type": "paraphrase", "question": "How can I tell if MySQL is doing a full table scan for my query?", "expected_sources": ["mysql-explain.md"]},
+    {"type": "paraphrase", "question": "What should an application do after MySQL rolls back one of two conflicting transactions?", "expected_sources": ["mysql-deadlocks.md"]},
+    {"type": "paraphrase", "question": "How do read-only copies of a MySQL database stay in sync with the main server?", "expected_sources": ["mysql-replication.md"]},
+    {"type": "paraphrase", "question": "How do I lock rows I have just read so nobody else can change them until I commit?", "expected_sources": ["mysql-transactions-isolation.md"]},
+    {"type": "paraphrase", "question": "How do I define a many-to-many link between users and roles?", "expected_sources": ["laravel-eloquent-relationships.md"]},
+    {"type": "paraphrase", "question": "How can I make sure a failed background job is tried again later?", "expected_sources": ["laravel-queues.md"]},
+    {"type": "paraphrase", "question": "Can a trait be instantiated directly?", "expected_sources": ["php-traits-interfaces.md"]},
+
+    {"type": "keyword", "question": "queue:work --tries", "expected_sources": ["laravel-queues.md"]},
+    {"type": "keyword", "question": "QUEUE_CONNECTION", "expected_sources": ["laravel-queues.md"]},
+    {"type": "keyword", "question": "composer dump-autoload", "expected_sources": ["php-composer-autoloading.md"]},
+    {"type": "keyword", "question": "Using filesort", "expected_sources": ["mysql-explain.md"]},
+    {"type": "keyword", "question": "SQLSTATE 40001 error 1213", "expected_sources": ["mysql-deadlocks.md"]},
+    {"type": "keyword", "question": "innodb_lock_wait_timeout", "expected_sources": ["mysql-deadlocks.md"]},
+    {"type": "keyword", "question": "migrate:fresh", "expected_sources": ["laravel-migrations.md"]},
+    {"type": "keyword", "question": "Cache::remember", "expected_sources": ["laravel-caching.md"]},
+    {"type": "keyword", "question": "SHOW REPLICA STATUS", "expected_sources": ["mysql-replication.md"]},
+    {"type": "keyword", "question": "make:request StorePostRequest", "expected_sources": ["laravel-validation.md"]},
+    {"type": "keyword", "question": "insteadof", "expected_sources": ["php-traits-interfaces.md"]},
+    {"type": "keyword", "question": "withCount", "expected_sources": ["laravel-eloquent-relationships.md"]},
+    {"type": "keyword", "question": "UnhandledMatchError", "expected_sources": ["php-error-handling.md"]},
+    {"type": "keyword", "question": "PSR-11 ContainerInterface", "expected_sources": ["php-dependency-injection.md"]},
+
+    {"type": "multi_doc", "question": "How does Laravel retry a database transaction that hits a deadlock?", "expected_sources": ["mysql-deadlocks.md"]},
+    {"type": "multi_doc", "question": "Which indexes should I add in a Laravel migration for a foreign key?", "expected_sources": ["laravel-migrations.md", "mysql-indexing.md"]},
+    {"type": "multi_doc", "question": "What is the relationship between Laravel's service container and dependency injection?", "expected_sources": ["laravel-service-container.md", "php-dependency-injection.md"]},
+    {"type": "multi_doc", "question": "Where do I configure the Redis connection for queues and the cache?", "expected_sources": ["laravel-queues.md", "laravel-caching.md"]},
+    {"type": "multi_doc", "question": "How do slow queries get logged and then analysed?", "expected_sources": ["mysql-explain.md"]},
+    {"type": "multi_doc", "question": "How are PHP namespaces mapped to folders on disk?", "expected_sources": ["php-composer-autoloading.md"]},
+
+    {"type": "out_of_scope", "question": "How do I cook chicken biryani?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "Who won the football match yesterday?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "What is the capital of Australia?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "How do I train a convolutional neural network in PyTorch?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "How do I configure a Kubernetes ingress controller?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "Explain the rules of cricket.", "expected_sources": []},
+    {"type": "out_of_scope", "question": "How do I reset my Gmail password?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "What is the weather in Mumbai today?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "How do I configure MongoDB sharding?", "expected_sources": []},
+    {"type": "out_of_scope", "question": "How do I use select_related in the Django ORM?", "expected_sources": []}
 ]

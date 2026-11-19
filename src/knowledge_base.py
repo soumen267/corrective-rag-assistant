@@ -24,7 +24,16 @@ def validate_file(file_path: Path) -> None:
         raise ValueError(f"Unsupported file type: {file_path.suffix}")
 
 
-def index_file(file_path: Path, owner_id: str | None = None) -> int:
+def index_file(
+    file_path: Path,
+    owner_id: str | None = None,
+    display_name: str | None = None,
+) -> int:
+    """Index one file.
+
+    `display_name` is the name the user uploaded. Files are stored under a
+    unique internal name, so without it citations would show that name.
+    """
     validate_file(file_path)
     if not file_path.exists() or not file_path.is_file():
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -41,6 +50,8 @@ def index_file(file_path: Path, owner_id: str | None = None) -> int:
     for chunk in chunks:
         chunk.metadata["source"] = source
         chunk.metadata["owner_id"] = owner
+        if display_name:
+            chunk.metadata["file_name"] = display_name
 
     ids = [str(chunk.metadata["chunk_id"]) for chunk in chunks]
     vector_store = get_vector_store()

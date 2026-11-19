@@ -6,6 +6,12 @@ from citations import Citation, create_citations
 from conversation import ConversationHistory
 from hybrid_search import hybrid_search
 from llm import get_llm
+from prompt_safety import (
+    UNTRUSTED_DATA_RULES,
+    sanitize_attribute,
+    sanitize_untrusted_text,
+    wrap_untrusted,
+)
 from query_rewriter import rewrite_query
 from reranker import rerank_documents
 
@@ -23,6 +29,9 @@ def format_context(
     """
     Format retrieved documents as numbered sources so the LLM
     can reference them using [Source N].
+
+    Document text is untrusted, so each source is sanitised and fenced
+    inside <retrieved_context> to keep it separate from instructions.
     """
     sections = []
 
@@ -30,9 +39,11 @@ def format_context(
         documents,
         start=1,
     ):
-        source = document.metadata.get(
-            "source",
-            "Unknown",
+        # Prefer the readable file name: stored paths are internal and the
+        # model tends to echo whatever label it is given.
+        source = sanitize_attribute(
+            document.metadata.get("file_name")
+            or document.metadata.get("source", "Unknown")
         )
 
         page = document.metadata.get("page")
@@ -51,10 +62,12 @@ def format_context(
 
         sections.append(
             f"{header}\n"
-            f"{document.page_content}"
+            f"{sanitize_untrusted_text(document.page_content)}"
         )
 
-    return "\n\n---\n\n".join(sections)
+    body = "\n\n---\n\n".join(sections)
+
+    return f"<retrieved_context>\n{body}\n</retrieved_context>"
 
 
 def print_retrieval_debug(
@@ -201,9 +214,13 @@ Rules:
   say:
   "I don't have enough information in the provided documents."
 - Keep the answer clear and concise.
-""".strip()
 
-    conversation = history.format_history()
+""".strip() + "\n\n" + UNTRUSTED_DATA_RULES
+
+    conversation = wrap_untrusted(
+        "conversation_history",
+        history.format_history(),
+    )
 
     user_prompt = f"""
 Conversation history:

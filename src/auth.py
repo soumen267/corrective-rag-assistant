@@ -150,11 +150,11 @@ def _unauthorized(detail: str = "Invalid or expired access token") -> HTTPExcept
     )
 
 
-def get_current_user_record(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    """Return the active database user represented by a user JWT."""
+def _validated_payload(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: Session,
+) -> dict[str, Any]:
+    """Verify the bearer token and make sure it has not been revoked."""
     if credentials is None:
         raise _unauthorized("Authentication required.")
 
@@ -162,11 +162,12 @@ def get_current_user_record(
     if is_token_revoked(db, payload["jti"]):
         raise _unauthorized("Token has been revoked.")
 
-    user_id = payload.get("uid")
-    if user_id is None:
-        raise _unauthorized("This token is not associated with a database user.")
+    return payload
 
-    user = db.query(User).filter(User.id == user_id).first()
+
+def _load_active_user(db: Session, payload: dict[str, Any]) -> User:
+    """Load the active account named by a token's `uid` claim."""
+    user = db.query(User).filter(User.id == payload["uid"]).first()
     if user is None or not user.is_active:
         raise _unauthorized("User account is unavailable.")
 
@@ -175,6 +176,19 @@ def get_current_user_record(
         raise _unauthorized("Token identity no longer matches the account.")
 
     return user
+
+
+def get_current_user_record(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Return the active database user represented by a user JWT."""
+    payload = _validated_payload(credentials, db)
+
+    if payload.get("uid") is None:
+        raise _unauthorized("This token is not associated with a database user.")
+
+    return _load_active_user(db, payload)
 
 
 def get_current_user_id(
@@ -193,21 +207,10 @@ def get_current_user(
     Existing API handlers currently expect a username string. Later ownership
     changes can use get_current_user_id or get_current_user_record.
     """
-    if credentials is None:
-        raise _unauthorized("Authentication required.")
+    payload = _validated_payload(credentials, db)
 
-    payload = verify_access_token(credentials.credentials)
-    if is_token_revoked(db, payload["jti"]):
-        raise _unauthorized("Token has been revoked.")
-
-    user_id = payload.get("uid")
-    if user_id is not None:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None or not user.is_active:
-            raise _unauthorized("User account is unavailable.")
-        if not hmac.compare_digest(payload["sub"], user.username):
-            raise _unauthorized("Token identity no longer matches the account.")
-        return user.username
+    if payload.get("uid") is not None:
+        return _load_active_user(db, payload).username
 
     # Backward compatibility for the existing environment-based admin login.
     configured_username = os.getenv("RAG_ADMIN_USERNAME", "")

@@ -1,70 +1,81 @@
-import os
-import json
+"""Compare retrieval strategies on the bundled, isolated evaluation corpus.
+
+Run from the project root:
+
+    python src/compare_retrieval.py            # human-readable report
+    python src/compare_retrieval.py --markdown # README-ready tables
+
+The corpus in eval/corpus is indexed into a temporary store, so the run is
+reproducible and never touches your real documents, vectors or database.
+"""
+
+import argparse
+import contextlib
+import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Callable
 
 from langchain_core.documents import Document
 
-from hybrid_search import hybrid_search
-from reranker import rerank_documents
-from search import search_documents
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-
-
-EVAL_OWNER_ID = os.getenv("RAG_EVAL_OWNER_ID", "").strip()
-if not EVAL_OWNER_ID:
-    raise RuntimeError("Set RAG_EVAL_OWNER_ID to a test account username before evaluation.")
-
-EVALUATION_FILE = Path("eval/retrieval_questions.json")
-
-FINAL_LIMIT = 3
-CANDIDATE_LIMIT = 10
+from eval_env import isolated_eval_index, load_questions, source_name  # noqa: E402
+from hybrid_search import hybrid_search  # noqa: E402
+from rag import CANDIDATE_LIMIT, FINAL_LIMIT  # noqa: E402
+from reranker import rerank_documents  # noqa: E402
+from search import search_documents  # noqa: E402
 
 SearchResult = list[tuple[Document, float]]
+RetrievalFunction = Callable[[str, str], SearchResult]
 
 
-def normalize_source(source: str) -> str:
-    return source.replace("\\", "/")
+# ---------------------------------------------------------------------------
+# Strategies (FINAL_LIMIT / CANDIDATE_LIMIT match the production pipeline)
+# ---------------------------------------------------------------------------
 
 
-def vector_retrieval(question: str) -> SearchResult:
-    """
-    Strategy A:
-    Vector search only.
+def vector_retrieval(question: str, owner_id: str) -> SearchResult:
+    """Strategy A: vector search only."""
+    return search_documents(
+        query=question,
+        limit=FINAL_LIMIT,
+        owner_id=owner_id,
+    )
+
+
+def vector_retrieval_no_cutoff(question: str, owner_id: str) -> SearchResult:
+    """Strategy A2: vector search ranking only, without the distance cutoff.
+
+    Separates ranking quality from the effect of the production
+    MAX_DISTANCE threshold, which discards weak matches.
     """
     return search_documents(
         query=question,
         limit=FINAL_LIMIT,
-        owner_id=EVAL_OWNER_ID,
+        max_distance=float("inf"),
+        owner_id=owner_id,
     )
 
 
-def hybrid_retrieval(question: str) -> SearchResult:
-    """
-    Strategy B:
-    Vector + BM25 + RRF.
-    """
+def hybrid_retrieval(question: str, owner_id: str) -> SearchResult:
+    """Strategy B: vector + BM25 fused with Reciprocal Rank Fusion."""
     return hybrid_search(
         query=question,
         limit=FINAL_LIMIT,
-        owner_id=EVAL_OWNER_ID,
+        owner_id=owner_id,
     )
 
 
-def reranked_retrieval(question: str) -> SearchResult:
-    """
-    Strategy C:
-    Vector + BM25 + RRF followed by cross-encoder reranking.
-    """
-    hybrid_results = hybrid_search(
-        query=question,
-        limit=CANDIDATE_LIMIT,
-        owner_id=EVAL_OWNER_ID,
-    )
-
+def reranked_retrieval(question: str, owner_id: str) -> SearchResult:
+    """Strategy C: hybrid candidates reranked by the cross-encoder."""
     candidates = [
         document
-        for document, _score in hybrid_results
+        for document, _score in hybrid_search(
+            query=question,
+            limit=CANDIDATE_LIMIT,
+            owner_id=owner_id,
+        )
     ]
 
     return rerank_documents(
@@ -74,31 +85,28 @@ def reranked_retrieval(question: str) -> SearchResult:
     )
 
 
-def get_retrieved_sources(
-    results: SearchResult,
-) -> list[str]:
-    return [
-        normalize_source(
-            str(document.metadata.get("source", "Unknown"))
-        )
-        for document, _score in results
-    ]
+STRATEGIES: list[tuple[str, RetrievalFunction]] = [
+    ("Vector only (distance cutoff)", vector_retrieval),
+    ("Vector only (no cutoff)", vector_retrieval_no_cutoff),
+    ("Hybrid (vector + BM25 + RRF)", hybrid_retrieval),
+    ("Hybrid + cross-encoder rerank", reranked_retrieval),
+]
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
 
 
 def find_expected_rank(
     retrieved_sources: list[str],
     expected_sources: list[str],
 ) -> int | None:
-    expected = {
-        normalize_source(source)
-        for source in expected_sources
-    }
+    """1-based rank of the first expected file, or None if absent."""
+    expected = {source_name(source) for source in expected_sources}
 
-    for rank, source in enumerate(
-        retrieved_sources,
-        start=1,
-    ):
-        if source in expected:
+    for rank, source in enumerate(retrieved_sources, start=1):
+        if source_name(source) in expected:
             return rank
 
     return None
@@ -106,220 +114,254 @@ def find_expected_rank(
 
 def evaluate_strategy(
     name: str,
-    retrieval_function: Callable[[str], SearchResult],
+    retrieval_function: RetrievalFunction,
     test_cases: list[dict],
+    owner_id: str,
 ) -> dict:
+    """Score one strategy.
+
+    In-scope questions: Hit@1, Hit@3 and reciprocal rank.
+    Out-of-scope questions (expected_sources == []): counted as correct only
+    when the retriever returns nothing. Strategies without a score threshold
+    always return something, so this column is informative mainly for vector
+    search; see `threshold_analysis` for the reranker.
     """
-    Evaluate one retrieval strategy.
+    totals = defaultdict(lambda: {"count": 0, "hit1": 0, "hit3": 0, "rr": 0.0})
+    overall = {"count": 0, "hit1": 0, "hit3": 0, "rr": 0.0}
+    rejection = {"count": 0, "correct": 0}
+    failures: list[dict] = []
+    in_scope_top_scores: list[float] = []
+    out_of_scope_top_scores: list[float] = []
 
-    Positive queries:
-        Measure Hit@K and reciprocal rank.
+    for case in test_cases:
+        question = case["question"]
+        expected = case["expected_sources"]
+        results = retrieval_function(question, owner_id)
+        retrieved = [str(d.metadata.get("source", "")) for d, _s in results]
+        top_score = results[0][1] if results else None
 
-    Rejection queries:
-        expected_sources == []
-        Pass only when no documents are retrieved.
-    """
-    positive_count = 0
-    positive_hits = 0
-    reciprocal_rank_total = 0.0
-
-    rejection_count = 0
-    rejection_hits = 0
-
-    failures = []
-
-    for test_case in test_cases:
-        question = test_case["question"]
-        expected_sources = test_case["expected_sources"]
-
-        results = retrieval_function(question)
-
-        retrieved_sources = get_retrieved_sources(results)
-
-        # Out-of-domain / rejection test
-        if not expected_sources:
-            rejection_count += 1
-
-            if not retrieved_sources:
-                rejection_hits += 1
+        if not expected:
+            rejection["count"] += 1
+            if top_score is not None:
+                out_of_scope_top_scores.append(top_score)
+            if not retrieved:
+                rejection["correct"] += 1
             else:
                 failures.append(
-                    {
-                        "question": question,
-                        "type": "rejection",
-                        "expected": [],
-                        "retrieved": retrieved_sources,
-                    }
+                    {"question": question, "type": "rejection", "expected": [],
+                     "retrieved": [source_name(s) for s in retrieved]}
                 )
-
             continue
 
-        # Normal retrieval test
-        positive_count += 1
+        if top_score is not None:
+            in_scope_top_scores.append(top_score)
 
-        rank = find_expected_rank(
-            retrieved_sources,
-            expected_sources,
-        )
+        rank = find_expected_rank(retrieved, expected)
+        bucket = totals[case.get("type", "other")]
 
-        if rank is not None:
-            positive_hits += 1
-            reciprocal_rank_total += 1.0 / rank
-        else:
+        for target in (bucket, overall):
+            target["count"] += 1
+            if rank == 1:
+                target["hit1"] += 1
+            if rank is not None:
+                target["hit3"] += 1
+                target["rr"] += 1.0 / rank
+
+        if rank is None:
             failures.append(
-                {
-                    "question": question,
-                    "type": "retrieval",
-                    "expected": expected_sources,
-                    "retrieved": retrieved_sources,
-                }
+                {"question": question, "type": case.get("type", "other"),
+                 "expected": expected,
+                 "retrieved": [source_name(s) for s in retrieved]}
             )
-
-    hit_rate = (
-        positive_hits / positive_count
-        if positive_count
-        else 0.0
-    )
-
-    mrr = (
-        reciprocal_rank_total / positive_count
-        if positive_count
-        else 0.0
-    )
-
-    rejection_accuracy = (
-        rejection_hits / rejection_count
-        if rejection_count
-        else None
-    )
 
     return {
         "name": name,
-        "positive_count": positive_count,
-        "hits": positive_hits,
-        "hit_rate": hit_rate,
-        "mrr": mrr,
-        "rejection_count": rejection_count,
-        "rejection_hits": rejection_hits,
-        "rejection_accuracy": rejection_accuracy,
+        "overall": overall,
+        "by_type": dict(totals),
+        "rejection": rejection,
         "failures": failures,
+        "in_scope_top_scores": in_scope_top_scores,
+        "out_of_scope_top_scores": out_of_scope_top_scores,
     }
 
 
-def print_results(results: list[dict]) -> None:
-    print("\n" + "=" * 80)
-    print("Retrieval Strategy Comparison")
-    print("=" * 80)
+def rate(numerator: float, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
 
-    print(
-        f"{'Strategy':<25}"
-        f"{'Hit@3':>12}"
-        f"{'MRR':>12}"
-        f"{'Rejection':>15}"
+
+def threshold_analysis(positive: list[float], negative: list[float]) -> dict | None:
+    """How well does the top-1 score separate in-scope from out-of-scope?
+
+    Returns the ROC AUC (probability that a random in-scope question scores
+    higher than a random out-of-scope one) and the threshold with the best
+    overall accuracy.
+    """
+    if not positive or not negative:
+        return None
+
+    wins = sum(
+        1.0 if p > n else 0.5 if p == n else 0.0
+        for p in positive
+        for n in negative
     )
+    auc = wins / (len(positive) * len(negative))
 
-    print("-" * 80)
+    best = None
+    for threshold in sorted(set(positive + negative)):
+        kept = sum(score >= threshold for score in positive)
+        rejected = sum(score < threshold for score in negative)
+        accuracy = (kept + rejected) / (len(positive) + len(negative))
+
+        if best is None or accuracy > best["accuracy"]:
+            best = {
+                "threshold": threshold,
+                "accuracy": accuracy,
+                "in_scope_kept": kept / len(positive),
+                "out_of_scope_rejected": rejected / len(negative),
+            }
+
+    return {
+        "auc": auc,
+        "lowest_in_scope": min(positive),
+        "highest_out_of_scope": max(negative),
+        **best,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+TYPE_LABELS = {
+    "paraphrase": "Paraphrased questions",
+    "keyword": "Keyword / identifier queries",
+    "multi_doc": "Multi-document questions",
+}
+
+
+def print_text_report(results: list[dict], analysis: dict | None) -> None:
+    print("\n" + "=" * 86)
+    print(f"Retrieval strategy comparison (top-{FINAL_LIMIT} results)")
+    print("=" * 86)
+    print(f"{'Strategy':<34}{'Hit@1':>9}{'Hit@3':>9}{'MRR':>9}{'Reject':>12}")
+    print("-" * 86)
 
     for result in results:
-        rejection_accuracy = result["rejection_accuracy"]
-
-        if rejection_accuracy is None:
-            rejection_text = "N/A"
-        else:
-            rejection_text = (
-                f"{rejection_accuracy:.2%}"
-            )
-
+        o, r = result["overall"], result["rejection"]
         print(
-            f"{result['name']:<25}"
-            f"{result['hit_rate']:>11.2%}"
-            f"{result['mrr']:>12.3f}"
-            f"{rejection_text:>15}"
+            f"{result['name']:<34}"
+            f"{rate(o['hit1'], o['count']):>9.1%}"
+            f"{rate(o['hit3'], o['count']):>9.1%}"
+            f"{rate(o['rr'], o['count']):>9.3f}"
+            f"{rate(r['correct'], r['count']):>12.0%}"
         )
 
-    print("=" * 80)
+    print("=" * 86)
+    print(f"In-scope questions: {results[0]['overall']['count']}   "
+          f"Out-of-scope: {results[0]['rejection']['count']}")
 
+    print("\nHit@3 by question type")
+    print("-" * 86)
+    for type_key, label in TYPE_LABELS.items():
+        row = f"{label:<34}"
+        for result in results:
+            bucket = result["by_type"].get(type_key)
+            row += f"{rate(bucket['hit3'], bucket['count']) if bucket else 0:>9.0%}"
+        print(row)
+    print("(columns follow the strategy order above)")
 
-def print_failures(results: list[dict]) -> None:
-    has_failures = False
+    if analysis:
+        print("\nOut-of-scope detection with the reranker's top-1 score")
+        print("-" * 86)
+        print(f"ROC AUC: {analysis['auc']:.3f}")
+        print(
+            f"Lowest in-scope top-1 score: {analysis['lowest_in_scope']:.2f}   "
+            f"Highest out-of-scope top-1 score: {analysis['highest_out_of_scope']:.2f}"
+        )
+        print(
+            f"Best threshold {analysis['threshold']:.2f}: keeps "
+            f"{analysis['in_scope_kept']:.0%} of in-scope and rejects "
+            f"{analysis['out_of_scope_rejected']:.0%} of out-of-scope questions"
+        )
 
     for result in results:
         if not result["failures"]:
             continue
-
-        has_failures = True
-
         print(f"\nFailures: {result['name']}")
-        print("-" * 60)
-
+        print("-" * 86)
         for failure in result["failures"]:
-            print(f"\nQuestion: {failure['question']}")
+            expected = ", ".join(failure["expected"]) or "(nothing)"
+            print(f"  [{failure['type']}] {failure['question']}")
+            print(f"      expected: {expected}")
+            print(f"      got:      {', '.join(failure['retrieved']) or '(nothing)'}")
 
-            if failure["type"] == "rejection":
-                print("Expected: no documents")
-            else:
-                print(
-                    "Expected: "
-                    + ", ".join(failure["expected"])
-                )
 
-            print("Retrieved:")
+def print_markdown_report(results: list[dict], analysis: dict | None) -> None:
+    o = results[0]["overall"]
+    print(f"| Strategy | Hit@1 | Hit@{FINAL_LIMIT} | MRR |")
+    print("|---|---|---|---|")
+    for result in results:
+        ov = result["overall"]
+        print(
+            f"| {result['name']} | {rate(ov['hit1'], ov['count']):.1%} | "
+            f"{rate(ov['hit3'], ov['count']):.1%} | "
+            f"{rate(ov['rr'], ov['count']):.3f} |"
+        )
 
-            if not failure["retrieved"]:
-                print("  No documents")
-            else:
-                for index, source in enumerate(
-                    failure["retrieved"],
-                    start=1,
-                ):
-                    print(f"  {index}. {source}")
+    print(f"\n*{o['count']} in-scope questions, "
+          f"{results[0]['rejection']['count']} out-of-scope.*\n")
 
-    if not has_failures:
-        print("\nNo failures found.")
+    print(f"| Hit@{FINAL_LIMIT} by question type | "
+          + " | ".join(r["name"] for r in results) + " |")
+    print("|---|" + "---|" * len(results))
+    for type_key, label in TYPE_LABELS.items():
+        cells = []
+        for result in results:
+            bucket = result["by_type"].get(type_key)
+            cells.append(f"{rate(bucket['hit3'], bucket['count']):.0%}" if bucket else "-")
+        count = results[0]["by_type"].get(type_key, {}).get("count", 0)
+        print(f"| {label} ({count}) | " + " | ".join(cells) + " |")
+
+    if analysis:
+        print(
+            f"\nReranker top-1 score separates in-scope from out-of-scope "
+            f"questions with ROC AUC **{analysis['auc']:.3f}**. The lowest "
+            f"in-scope top-1 score is {analysis['lowest_in_scope']:.2f} and the "
+            f"highest out-of-scope score is {analysis['highest_out_of_scope']:.2f}; "
+            f"the best threshold ({analysis['threshold']:.2f}) keeps "
+            f"{analysis['in_scope_kept']:.0%} of in-scope questions and "
+            f"rejects {analysis['out_of_scope_rejected']:.0%} of out-of-scope ones."
+        )
 
 
 def main() -> None:
-    if not EVALUATION_FILE.exists():
-        raise FileNotFoundError(
-            f"Evaluation file not found: {EVALUATION_FILE}"
-        )
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--markdown", action="store_true",
+                        help="print README-ready tables instead of the text report")
+    args = parser.parse_args()
 
-    with EVALUATION_FILE.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
-        test_cases = json.load(file)
+    test_cases = load_questions()
 
-    strategies = [
-        (
-            "Vector Only",
-            vector_retrieval,
-        ),
-        (
-            "Hybrid",
-            hybrid_retrieval,
-        ),
-        (
-            "Hybrid + Reranker",
-            reranked_retrieval,
-        ),
-    ]
+    # Loader progress messages go to stderr so stdout contains only the report.
+    with contextlib.redirect_stdout(sys.stderr):
+        with isolated_eval_index() as owner_id:
+            results = []
+            for name, retrieval_function in STRATEGIES:
+                print(f"Evaluating: {name}")
+                results.append(
+                    evaluate_strategy(name, retrieval_function, test_cases, owner_id)
+                )
 
-    results = []
+    reranked = results[-1]
+    analysis = threshold_analysis(
+        reranked["in_scope_top_scores"],
+        reranked["out_of_scope_top_scores"],
+    )
 
-    for name, retrieval_function in strategies:
-        print(f"\nEvaluating: {name}")
-
-        result = evaluate_strategy(
-            name=name,
-            retrieval_function=retrieval_function,
-            test_cases=test_cases,
-        )
-
-        results.append(result)
-
-    print_results(results)
-    print_failures(results)
+    if args.markdown:
+        print_markdown_report(results, analysis)
+    else:
+        print_text_report(results, analysis)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from corrective_rewriter import rewrite_for_retrieval
 from document_grader import grade_documents
 
 from llm import get_llm
+from prompt_safety import UNTRUSTED_DATA_RULES, wrap_untrusted
 from query_rewriter import rewrite_query
 from rag import format_context, retrieve_documents
 
@@ -207,7 +208,10 @@ def generate_node(
         documents
     )
 
-    conversation = history.format_history()
+    conversation = wrap_untrusted(
+        "conversation_history",
+        history.format_history(),
+    )
 
     system_prompt = """
 You are a precise document question-answering assistant.
@@ -228,7 +232,7 @@ IMPORTANT RULES:
    "I don't have enough information in the provided documents."
 
 Keep answers short and direct.
-""".strip()
+""".strip() + "\n\n" + UNTRUSTED_DATA_RULES
 
     user_prompt = f"""
 Conversation history:

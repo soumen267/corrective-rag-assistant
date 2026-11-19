@@ -26,7 +26,10 @@ backend to a lightweight web interface.
 - Local generation with Ollama
 - FastAPI REST API
 - Web-based chat and document management
-- Retrieval evaluation using Hit@K, MRR and rejection accuracy
+- JWT authentication with token revocation and login rate limiting
+- Per-user private knowledge bases and persistent chat history (MySQL)
+- Reproducible retrieval benchmark (Hit@K, MRR, reranker-score threshold analysis)
+- Prompt-injection defences and an offline test suite with CI
 
 ## Features
 
@@ -46,7 +49,13 @@ backend to a lightweight web interface.
 - LangGraph workflow orchestration
 - Local LLM inference with Ollama
 - Web-based chat interface
-- Retrieval evaluation with Hit@K, MRR, and rejection accuracy
+- Retrieval evaluation with Hit@K, MRR, and out-of-scope score analysis
+- Prompt-injection hardening of all LLM prompts
+- Admin-controlled multi-user accounts (PBKDF2 password hashing, JWT with `jti` revocation)
+- Per-user document isolation in both the filesystem and the vector store
+- Persistent conversation history in MySQL
+- Document versioning with content-hash deduplication
+- Liveness (`/health`) and readiness (`/health/ready`) endpoints
 
 ## Architecture
 
@@ -191,6 +200,8 @@ The API returns citation metadata including:
 - FastAPI
 - Pydantic
 - Uvicorn
+- SQLAlchemy + PyMySQL (MySQL)
+- PyJWT
 
 ### Frontend
 
@@ -202,22 +213,43 @@ The API returns citation metadata including:
 
 ```text
 rag-learning/
-├── frontend/
-├── src/
-├── data/
-├── eval/
+├── frontend/            # Static HTML/CSS/JS chat UI
+├── src/                 # FastAPI app, RAG pipeline, auth, models
+├── data/users/<user>/   # Per-user uploaded documents (git-ignored)
+├── vector_store/        # Local Chroma database (git-ignored)
+├── eval/                # Benchmark corpus (16 docs) and labelled questions (50)
+├── tests/               # Offline pytest suite (mocked LLM, SQLite)
+├── .github/workflows/   # CI: runs the test suite
 ├── screenshots/
-├── .env.example
+├── .env.example         # Configuration template
+├── reset_admin_password.py  # Generates a bootstrap admin password hash
+├── pytest.ini
+├── requirements.txt
+├── requirements-dev.txt # Test dependencies
 ├── .gitignore
-├── README.md
-└── requirements.txt
+└── README.md
 ```
+
+Key backend modules:
+
+| Module | Responsibility |
+|---|---|
+| `api.py` | FastAPI app, chat, document and session endpoints |
+| `auth.py`, `auth_routes.py` | JWT creation/validation, login, user management, logout |
+| `rag_graph.py` | LangGraph corrective RAG workflow |
+| `hybrid_search.py`, `bm25_search.py`, `search.py` | Vector, BM25 and RRF retrieval |
+| `reranker.py`, `document_grader.py` | Cross-encoder reranking and LLM relevance grading |
+| `knowledge_base.py`, `vector_store.py` | Per-user indexing into Chroma |
+| `database.py`, `*_models.py` | SQLAlchemy engine and MySQL tables |
+| `prompt_safety.py` | Fencing and sanitising of untrusted text in prompts |
+| `eval_env.py`, `compare_retrieval.py`, `evaluate_retrieval.py` | Isolated, reproducible retrieval benchmark |
 
 ## Prerequisites
 
 Install:
 
 - Python 3.10+
+- MySQL 8+ (or MariaDB / XAMPP MySQL)
 - Ollama
 - Git
 
@@ -258,9 +290,39 @@ Install dependencies:
 python -m pip install -r requirements.txt
 ```
 
+## Configuration
+
+Create the MySQL database (tables are created automatically on startup):
+
+```sql
+CREATE DATABASE rag_assistant CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+Copy the template and fill in the values:
+
+```bash
+cp .env.example .env        # Windows: copy .env.example .env
+```
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `RAG_AUTH_SECRET` | yes | JWT signing secret, at least 32 bytes |
+| `RAG_ADMIN_USERNAME` / `RAG_ADMIN_PASSWORD_HASH` | for first setup | Bootstrap admin login |
+| `MYSQL_DATABASE`, `MYSQL_USER` | yes | MySQL connection |
+| `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_PASSWORD` | no | Defaults: `127.0.0.1`, `3306`, empty |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_SECONDS` | no | Defaults: `http://127.0.0.1:11434`, `llama3.2`, `120` |
+| `CORS_ALLOW_ORIGINS` | no | Comma-separated browser origins; default `http://127.0.0.1:5500,http://localhost:5500`. `*` is refused |
+| `RAG_EVAL_OWNER_ID` | only for `src/test_graph.py` | User whose real knowledge base the manual graph script queries (the benchmark does not need it) |
+
+Generate a secret:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
 ## Run the Backend
 
-Make sure Ollama is available, then run:
+Make sure MySQL and Ollama are running, then:
 
 ```bash
 python -m uvicorn api:app --app-dir src --reload
@@ -293,32 +355,151 @@ Open:
 http://127.0.0.1:5500
 ```
 
+Sign in with an account created by an administrator (see
+[Authentication](#authentication)). The page returns to the sign-in screen
+automatically when the token expires or is revoked.
+
+## Authentication
+
+All endpoints except `/health`, `/health/ready` and `/auth/login` require
+`Authorization: Bearer <token>`. Accounts are created by an administrator;
+there is no public sign-up.
+
+### Create the first admin
+
+Generate a password hash for the bootstrap admin (run from the project root)
+and put it in `.env` as `RAG_ADMIN_PASSWORD_HASH`:
+
+```bash
+python reset_admin_password.py
+```
+
+The script prompts for the password (minimum 12 characters), prints the hash
+and does not modify `.env`.
+
+Log in with that bootstrap admin, then create database users via
+`POST /auth/users` (Swagger UI at `/docs` → *Authorize*).
+
+### Example
+
+```bash
+# 1. Log in
+curl -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "YOUR_PASSWORD"}'
+
+# 2. Ask a question
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What does Laravel middleware do?"}'
+```
+
+Tokens expire after 1 hour and can be revoked with `POST /auth/logout`.
+Login is limited to 5 failed attempts per client per 15 minutes.
+
 ## API Endpoints
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/health` | Backend health check |
-| POST | `/chat` | Ask the RAG assistant |
-| GET | `/documents` | List knowledge-base documents |
-| POST | `/documents` | Upload and index a document |
-| DELETE | `/documents` | Delete a document and its indexed chunks |
-| DELETE | `/sessions/{session_id}` | Clear conversation history |
+| Method | Endpoint | Auth | Purpose |
+|---|---|---|---|
+| GET | `/health` | no | Liveness check |
+| GET | `/health/ready` | no | Readiness: MySQL, Chroma and Ollama |
+| POST | `/auth/login` | no | Exchange credentials for a JWT |
+| POST | `/auth/logout` | yes | Revoke the current token |
+| GET | `/auth/me` | yes | Current account profile |
+| POST | `/auth/users` | admin | Create a user account |
+| POST | `/chat` | yes | Ask the RAG assistant |
+| GET | `/documents` | yes | List your knowledge-base documents |
+| POST | `/documents` | yes | Upload and index a document (max 10 MB) |
+| DELETE | `/documents` | yes | Delete a document and its indexed chunks |
+| DELETE | `/sessions/{session_id}` | yes | Clear conversation history |
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The suite runs offline: Ollama and the retrieval models are mocked, and MySQL is
+replaced by in-memory SQLite, so it never touches your real database or `.env`.
+
+| Area | What is verified |
+|---|---|
+| Auth | PBKDF2 hashing, JWT claims, expiry, bad signature/issuer, `alg=none`, revocation on logout, deactivated users, login rate limiting, admin-only user creation |
+| Documents | Size limit, PDF/UTF-8 content checks, path-traversal filenames, dedup by hash, cleanup after failures, cross-user deletion blocked |
+| Sessions | Ownership (foreign sessions look like missing ones), history order and 10-message window, generic 500 errors |
+| Retrieval | RRF scoring and fusion, result limits, mandatory `owner_id`, BM25 per-user isolation and index refresh |
+| Benchmark data | Every expected source exists, every corpus file is covered, no duplicate questions, documents span multiple chunks, metric helpers (rank, ROC AUC) |
+| Prompt safety | Fence-forging tags escaped, invisible characters stripped, attribute breakout blocked, rules present in generator/grader/rewriter prompts |
+| LangGraph | Routing (generate / corrective rewrite / fallback), retry cap, no LLM call when nothing is relevant, citations only from graded chunks |
+
+GitHub Actions runs the same suite on every push and pull request
+([.github/workflows/tests.yml](.github/workflows/tests.yml)).
 
 ## Retrieval Evaluation
 
-The project includes retrieval evaluation covering:
+The benchmark is self-contained and reproducible. It indexes a bundled corpus
+into a temporary store, so it never touches your real documents, vectors or
+database:
 
-- Hit@K
-- Mean Reciprocal Rank (MRR)
-- rejection accuracy
+```bash
+python src/compare_retrieval.py              # full comparison report
+python src/compare_retrieval.py --markdown   # README-ready tables
+python src/evaluate_retrieval.py             # per-question view of the production pipeline
+```
 
-The evaluation compares:
+**Dataset** ([eval/](eval/)): 16 documents (78 chunks) on Laravel, PHP and MySQL,
+and 50 labelled questions: 20 paraphrased, 14 keyword/identifier lookups,
+6 multi-document, and 10 out-of-scope (including near-domain traps such as
+MongoDB sharding and the Django ORM).
 
-1. Vector retrieval
-2. Hybrid retrieval
-3. Hybrid retrieval + cross-encoder reranking
+**Metrics:** Hit@1, Hit@3 and MRR over the top-3 retrieved chunks, using the same
+candidate and result limits as production.
 
-Evaluation results depend on the active test corpus and should be interpreted together with the size and difficulty of the evaluation set.
+### Results
+
+| Strategy | Hit@1 | Hit@3 | MRR |
+|---|---|---|---|
+| Vector only (production distance cutoff) | 52.5% | 52.5% | 0.525 |
+| Vector only (no cutoff) | 92.5% | 100.0% | 0.958 |
+| Hybrid (vector + BM25 + RRF) | 97.5% | 97.5% | 0.975 |
+| Hybrid + cross-encoder rerank | 100.0% | 100.0% | 1.000 |
+
+| Hit@3 by question type | Vector (cutoff) | Vector (no cutoff) | Hybrid | Hybrid + rerank |
+|---|---|---|---|---|
+| Paraphrased (20) | 60% | 100% | 100% | 100% |
+| Keyword / identifier (14) | 36% | 100% | 100% | 100% |
+| Multi-document (6) | 67% | 100% | 83% | 100% |
+
+### What the results show
+
+- **The vector distance cutoff was the largest source of misses.** With the
+  production `MAX_DISTANCE` of 0.9, vector search returns nothing for most
+  identifier-style queries (`QUEUE_CONNECTION`, `insteadof`, `migrate:fresh`).
+  Hybrid retrieval recovers them because BM25 matches exact tokens.
+- **Ranking quality alone is closer than the cutoff suggests.** Without the cutoff,
+  vector search already reaches 100% Hit@3 on this corpus. Hybrid and reranking
+  improve Hit@1 and MRR (0.958 → 0.975 → 1.000), a modest gain.
+- **The reranker repairs a fusion miss.** Plain hybrid missed one multi-document
+  question that vector search found; the cross-encoder, which scores the 10 fused
+  candidates, put the right file first.
+- **The reranker score separates in-scope from out-of-scope questions.** Across the
+  40 in-scope questions the lowest top-1 score is -3.78, while the highest among the
+  10 out-of-scope questions is -9.98 (ROC AUC 1.000). Retrieval itself always returns
+  something, so rejection today depends on the LLM grader; a reranker-score
+  threshold could act as a much cheaper pre-filter before it.
+
+### Limitations of this benchmark
+
+- The corpus and questions were written together, and the questions are mostly
+  answerable by a single document, which inflates scores. Results near 100% mean the
+  benchmark no longer discriminates well between strategies; treat the small
+  differences between the last three rows as indicative, not statistically significant
+  (40 in-scope questions).
+- It measures retrieval only. Answer faithfulness and the LLM grader are not scored.
+- The reranker threshold finding rests on 10 out-of-scope questions and should be
+  re-checked on a larger, harder, real-world set before being used in production.
 
 ## Design Decisions
 
@@ -360,26 +541,53 @@ Ollama allows the application to run the generation model locally without requir
 
 ## Current Limitations
 
-- Conversation sessions are stored in memory and are lost when the backend restarts.
-- Session state is not designed for multiple backend workers.
-- BM25 is currently rebuilt from filesystem documents during search.
-- Local LLM grading increases response latency.
+- The web UI keeps the JWT in `sessionStorage`; a production deployment should
+  prefer an httpOnly cookie plus a strict Content-Security-Policy.
+- Login rate limiting is in process memory, so it is per worker and resets on restart.
+- BM25 indexes are cached per process (keyed by a file fingerprint), and a document
+  change clears the cache for all users.
+- Document grading makes one sequential LLM call per retrieved chunk, which
+  increases response latency.
 - Reranker scores are ranking signals, not calibrated confidence probabilities.
 - Uploaded document/index updates are not fully transactional.
-- The current evaluation corpus is intentionally small and should be expanded for stronger benchmarking.
+- The benchmark corpus is small and author-written (see Retrieval Evaluation limitations).
 
 ## Future Improvements
 
-- Persistent conversation storage
 - Streaming responses
-- Structured-output relevance grading
-- BM25 index caching and refresh
-- Larger retrieval evaluation dataset
-- Docker support
-- Authentication and document ownership
-- Production deployment
+- Structured-output, batched relevance grading
+- Shared rate limiting and caching (e.g. Redis) for multi-worker deployment
+- Harder, independently authored evaluation set and answer-quality metrics
+- Reranker-score threshold as a cheap pre-filter before LLM grading
+- Integration tests against a real MySQL, Chroma and Ollama
+- Docker Compose (API + MySQL + Ollama)
+- Database migrations (Alembic)
 
 ## Security Notes
+
+Implemented: PBKDF2-SHA256 password hashing (600k iterations), signed JWTs with
+issuer, expiry and `jti` revocation, per-user data isolation, upload size and
+content validation, path-traversal protection, and security response headers.
+
+### Prompt-injection defences
+
+Uploaded documents are attacker-controllable and end up inside LLM prompts, so
+[prompt_safety.py](src/prompt_safety.py) applies several layers:
+
+- Retrieved chunks, graded documents and conversation history are fenced in
+  `<retrieved_context>`, `<document>` and `<conversation_history>` tags.
+- Tag look-alikes in untrusted text are escaped, so a document cannot close a
+  fence early or forge a `<source>` block.
+- Zero-width, bidirectional-control and other invisible characters are removed.
+- The system prompts declare fenced text to be data, never instructions, and
+  forbid revealing the prompt.
+- The relevance grader is warned that a document cannot vote for itself.
+- Per-user isolation limits the damage to the uploader's own knowledge base, and
+  the UI renders model output as plain text, so injected markup is never executed.
+
+These measures raise the cost of an attack but cannot guarantee that a local
+model will always obey the rules; tests verify the prompt structure, not model
+behaviour.
 
 Uploaded document content and generated LLM output should be treated as untrusted input.
 

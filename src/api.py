@@ -3,7 +3,7 @@ import logging
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
 from auth_routes import router as auth_router
@@ -39,6 +39,27 @@ logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 UPLOAD_CHUNK_SIZE = 1024 * 1024     # 1 MB
+
+DEFAULT_CORS_ORIGINS = "http://127.0.0.1:5500,http://localhost:5500"
+
+
+def get_cors_origins() -> list[str]:
+    """Allowed browser origins from CORS_ALLOW_ORIGINS (comma-separated)."""
+    raw = os.getenv("CORS_ALLOW_ORIGINS", DEFAULT_CORS_ORIGINS)
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    # Credentials are allowed, so a wildcard origin would be unsafe.
+    if "*" in origins:
+        raise RuntimeError(
+            "CORS_ALLOW_ORIGINS must list explicit origins, not '*'."
+        )
+
+    return origins
+
+
+def utc_now() -> datetime:
+    """Current UTC time as a naive datetime, matching the DateTime columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def validate_upload_content(file_path: Path, extension: str) -> None:
@@ -77,10 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-    ],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -140,6 +158,8 @@ class DocumentUploadResponse(BaseModel):
 
 class DocumentListResponse(BaseModel):
     documents: list[str]
+    # stored path -> the file name the user uploaded
+    names: dict[str, str] = {}
 
 
 class DocumentDeleteResponse(BaseModel):
@@ -238,7 +258,7 @@ def save_chat_exchange(
             ),
         ])
 
-        db_session.updated_at = datetime.utcnow()
+        db_session.updated_at = utc_now()
         db.commit()
 
 
@@ -344,10 +364,22 @@ def chat(
             detail="Unable to process the question.",
         ) from exception
 
+    # Documents indexed before display names were stored carry the internal
+    # file name; the registry knows the name the user uploaded.
+    with SessionLocal() as db:
+        uploaded_names = {
+            record.stored_path: record.original_filename
+            for record in db.scalars(
+                select(document_models.UserDocument).where(
+                    document_models.UserDocument.owner_username == current_user
+                )
+            ).all()
+        }
+
     citation_responses = [
         CitationResponse(
             source=citation.source,
-            file_name=citation.file_name,
+            file_name=uploaded_names.get(citation.source, citation.file_name),
             file_type=citation.file_type,
             page=citation.page,
             chunk_id=citation.chunk_id,
@@ -397,7 +429,7 @@ def clear_session(
                 chat_models.ChatMessage.session_id == session_id
             )
         )
-        db_session.updated_at = datetime.utcnow()
+        db_session.updated_at = utc_now()
         db.commit()
 
     return ClearSessionResponse(
@@ -507,7 +539,11 @@ def upload_document(
                 )
 
             # Index the new version before removing the previous version.
-            chunks_indexed = index_file(destination, owner_id=current_user)
+            chunks_indexed = index_file(
+                destination,
+                owner_id=current_user,
+                display_name=safe_name,
+            )
             clear_bm25_cache(current_user)
 
             if chunks_indexed <= 0:
@@ -570,6 +606,11 @@ def upload_document(
         )
 
     except HTTPException:
+        # Oversized or invalid uploads must not leave a partial file behind.
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Rejected upload cleanup failed")
         raise
 
     except Exception as exception:
@@ -601,8 +642,17 @@ def upload_document(
     response_model=DocumentListResponse,
 )
 def get_documents(current_user: str = Depends(get_current_user),) -> DocumentListResponse:
+    with SessionLocal() as db:
+        records = db.scalars(
+            select(document_models.UserDocument).where(
+                document_models.UserDocument.owner_username == current_user
+            )
+        ).all()
+        names = {record.stored_path: record.original_filename for record in records}
+
     return DocumentListResponse(
-        documents=list_knowledge_files(owner_id=current_user)
+        documents=list_knowledge_files(owner_id=current_user),
+        names=names,
     )
 
 

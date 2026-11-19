@@ -47,6 +47,175 @@ const statusDot = document.querySelector(
     ".status-dot"
 );
 
+const loginOverlay = document.getElementById(
+    "loginOverlay"
+);
+
+const loginForm = document.getElementById(
+    "loginForm"
+);
+
+const loginUsername = document.getElementById(
+    "loginUsername"
+);
+
+const loginPassword = document.getElementById(
+    "loginPassword"
+);
+
+const loginError = document.getElementById(
+    "loginError"
+);
+
+const loginButton = document.getElementById(
+    "loginButton"
+);
+
+const logoutButton = document.getElementById(
+    "logoutButton"
+);
+
+const currentUser = document.getElementById(
+    "currentUser"
+);
+
+
+// --------------------------------------------------
+// Authentication
+// --------------------------------------------------
+
+// sessionStorage keeps the token only for this tab and
+// clears it when the tab is closed.
+const TOKEN_KEY = "rag_access_token";
+
+function getToken() {
+    try {
+        return sessionStorage.getItem(TOKEN_KEY);
+    } catch {
+        return null;
+    }
+}
+
+function setToken(token) {
+    try {
+        if (token) {
+            sessionStorage.setItem(TOKEN_KEY, token);
+        } else {
+            sessionStorage.removeItem(TOKEN_KEY);
+        }
+    } catch {
+        // Storage unavailable; the session lasts until reload.
+    }
+}
+
+function showLogin() {
+    setToken(null);
+
+    sessionId = null;
+    currentUser.textContent = "";
+    documentList.innerHTML = "";
+
+    loginPassword.value = "";
+    loginError.classList.add("hidden");
+
+    loginOverlay.classList.remove("hidden");
+    loginUsername.focus();
+}
+
+function resetChat() {
+    chatMessages.innerHTML = `
+        <div class="welcome">
+            <h2>
+                Ask your knowledge base
+            </h2>
+
+            <p>
+                Answers are generated from your
+                indexed documents using hybrid
+                retrieval and local AI.
+            </p>
+        </div>
+    `;
+}
+
+async function startSession() {
+    loginOverlay.classList.add("hidden");
+
+    try {
+        const profile = await apiRequest("/auth/me");
+        currentUser.textContent = profile.username;
+    } catch {
+        // apiRequest already returned to the login screen on 401.
+    }
+
+    await loadDocuments();
+
+    questionInput.focus();
+}
+
+loginForm.addEventListener(
+    "submit",
+    async (event) => {
+        event.preventDefault();
+
+        loginError.classList.add("hidden");
+
+        loginButton.disabled = true;
+        loginButton.textContent = "Signing in...";
+
+        try {
+            const data = await apiRequest(
+                "/auth/login",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                    },
+                    body: JSON.stringify({
+                        username:
+                            loginUsername.value.trim(),
+                        password:
+                            loginPassword.value,
+                    }),
+                }
+            );
+
+            setToken(data.access_token);
+
+            loginPassword.value = "";
+
+            resetChat();
+            await startSession();
+
+        } catch (error) {
+            loginError.textContent = error.message;
+            loginError.classList.remove("hidden");
+
+        } finally {
+            loginButton.disabled = false;
+            loginButton.textContent = "Sign in";
+        }
+    }
+);
+
+logoutButton.addEventListener(
+    "click",
+    async () => {
+        try {
+            await apiRequest(
+                "/auth/logout",
+                { method: "POST" }
+            );
+        } catch {
+            // Clear the local session even if revocation fails.
+        }
+
+        resetChat();
+        showLogin();
+    }
+);
+
 
 // --------------------------------------------------
 // API helper
@@ -56,10 +225,37 @@ async function apiRequest(
     endpoint,
     options = {}
 ) {
+    const headers = new Headers(
+        options.headers || {}
+    );
+
+    const token = getToken();
+
+    if (token) {
+        headers.set(
+            "Authorization",
+            `Bearer ${token}`
+        );
+    }
+
     const response = await fetch(
         `${API_BASE_URL}${endpoint}`,
-        options
+        { ...options, headers }
     );
+
+    // An expired or revoked token returns to the login screen.
+    // Failed logins (/auth/login) show their own error instead.
+    if (
+        response.status === 401 &&
+        endpoint !== "/auth/login"
+    ) {
+        resetChat();
+        showLogin();
+
+        throw new Error(
+            "Your session has expired. Please sign in again."
+        );
+    }
 
     if (!response.ok) {
         let message = "Request failed.";
@@ -130,7 +326,8 @@ async function loadDocuments() {
         );
 
         renderDocuments(
-            data.documents
+            data.documents,
+            data.names || {}
         );
 
     } catch (error) {
@@ -145,7 +342,7 @@ async function loadDocuments() {
 }
 
 
-function renderDocuments(documents) {
+function renderDocuments(documents, names = {}) {
     documentList.innerHTML = "";
 
     if (!documents.length) {
@@ -180,8 +377,11 @@ function renderDocuments(documents) {
 
         name.className = "document-name";
 
-        name.textContent =
-            getFileName(source);
+        const displayName =
+            names[source] || getFileName(source);
+
+        name.textContent = displayName;
+        name.title = displayName;
 
 
         const path = document.createElement(
@@ -208,12 +408,14 @@ function renderDocuments(documents) {
 
         deleteButton.addEventListener(
             "click",
-            () => deleteDocument(source)
+            () => deleteDocument(source, displayName)
         );
 
 
+        // The stored path is an internal name; keep it as a tooltip only.
+        path.title = source;
+
         info.appendChild(name);
-        info.appendChild(path);
 
         item.appendChild(info);
         item.appendChild(deleteButton);
@@ -298,9 +500,9 @@ fileInput.addEventListener(
 // Delete document
 // --------------------------------------------------
 
-async function deleteDocument(source) {
+async function deleteDocument(source, displayName) {
     const confirmed = window.confirm(
-        `Delete ${getFileName(source)}?`
+        `Delete ${displayName || getFileName(source)}?`
     );
 
     if (!confirmed) {
@@ -704,19 +906,7 @@ clearChatButton.addEventListener(
 
         sessionId = null;
 
-        chatMessages.innerHTML = `
-            <div class="welcome">
-                <h2>
-                    Ask your knowledge base
-                </h2>
-
-                <p>
-                    Answers are generated from your
-                    indexed documents using hybrid
-                    retrieval and local AI.
-                </p>
-            </div>
-        `;
+        resetChat();
     }
 );
 
@@ -814,11 +1004,20 @@ questionInput.addEventListener(
 // Initialization
 // --------------------------------------------------
 
+refreshDocumentsButton.addEventListener(
+    "click",
+    loadDocuments
+);
+
+
 async function initialize() {
     await checkHealth();
-    await loadDocuments();
 
-    questionInput.focus();
+    if (getToken()) {
+        await startSession();
+    } else {
+        showLogin();
+    }
 }
 
 

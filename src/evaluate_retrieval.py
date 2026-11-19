@@ -1,172 +1,79 @@
-import os
-import json
+"""Question-by-question view of the production retrieval pipeline.
+
+Run from the project root:
+
+    python src/evaluate_retrieval.py
+
+Uses the same isolated evaluation corpus as compare_retrieval.py, so it never
+touches your real documents or vector store.
+"""
+
+import contextlib
+import sys
 from pathlib import Path
 
-from hybrid_search import hybrid_search
-from reranker import rerank_documents
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-
-
-EVAL_OWNER_ID = os.getenv("RAG_EVAL_OWNER_ID", "").strip()
-if not EVAL_OWNER_ID:
-    raise RuntimeError("Set RAG_EVAL_OWNER_ID to a test account username before evaluation.")
-
-EVALUATION_FILE = Path("eval/retrieval_questions.json")
-CANDIDATE_LIMIT = 10
-FINAL_LIMIT = 3
-
-
-def normalize_source(source: str) -> str:
-    """
-    Normalize Windows/Unix path separators so evaluation
-    behaves consistently across platforms.
-    """
-    return source.replace("\\", "/")
-
-
-def retrieve(question: str):
-    """
-    Run the complete retrieval pipeline without calling Ollama.
-    """
-    hybrid_results = hybrid_search(
-        query=question,
-        limit=CANDIDATE_LIMIT,
-        owner_id=EVAL_OWNER_ID,
-    )
-
-    candidate_documents = [
-        document
-        for document, _score in hybrid_results
-    ]
-
-    return rerank_documents(
-        query=question,
-        documents=candidate_documents,
-        limit=FINAL_LIMIT,
-    )
-
-
-def find_expected_rank(
-    retrieved_sources: list[str],
-    expected_sources: list[str],
-) -> int | None:
-    """
-    Return the rank of the first expected source.
-    """
-    normalized_expected = {
-        normalize_source(source)
-        for source in expected_sources
-    }
-
-    for rank, source in enumerate(
-        retrieved_sources,
-        start=1,
-    ):
-        if normalize_source(source) in normalized_expected:
-            return rank
-
-    return None
+from compare_retrieval import find_expected_rank, reranked_retrieval  # noqa: E402
+from eval_env import isolated_eval_index, load_questions, source_name  # noqa: E402
+from rag import FINAL_LIMIT  # noqa: E402
 
 
 def evaluate() -> None:
-    if not EVALUATION_FILE.exists():
-        raise FileNotFoundError(
-            f"Evaluation file not found: {EVALUATION_FILE}"
-        )
+    test_cases = load_questions()
 
-    with EVALUATION_FILE.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
-        test_cases = json.load(file)
-
-    total_questions = len(test_cases)
-
-    if total_questions == 0:
-        print("No evaluation questions found.")
-        return
+    # Skip out-of-scope questions: they are measured by compare_retrieval.py
+    # through the reranker score analysis.
+    in_scope = [case for case in test_cases if case["expected_sources"]]
 
     hits = 0
     reciprocal_rank_total = 0.0
 
-    print("=" * 70)
-    print("RAG Retrieval Evaluation")
-    print("=" * 70)
+    with contextlib.redirect_stdout(sys.stderr):
+        index = isolated_eval_index()
+        owner_id = index.__enter__()
 
-    for index, test_case in enumerate(
-        test_cases,
-        start=1,
-    ):
-        question = test_case["question"]
-        expected_sources = test_case["expected_sources"]
+    try:
+        print("=" * 70)
+        print("RAG Retrieval Evaluation (hybrid + cross-encoder reranker)")
+        print("=" * 70)
 
-        results = retrieve(question)
+        for number, case in enumerate(in_scope, start=1):
+            with contextlib.redirect_stdout(sys.stderr):
+                results = reranked_retrieval(case["question"], owner_id)
 
-        retrieved_sources = [
-            str(document.metadata.get("source", "Unknown"))
-            for document, _score in results
-        ]
+            retrieved = [str(d.metadata.get("source", "")) for d, _s in results]
+            rank = find_expected_rank(retrieved, case["expected_sources"])
 
-        rank = find_expected_rank(
-            retrieved_sources,
-            expected_sources,
-        )
+            if rank is not None:
+                hits += 1
+                reciprocal_rank_total += 1.0 / rank
 
-        if rank is not None:
-            hits += 1
-            reciprocal_rank = 1.0 / rank
-            reciprocal_rank_total += reciprocal_rank
+            print(f"\n[{number}] {'PASS' if rank is not None else 'FAIL'} "
+                  f"[{case.get('type', 'other')}]")
+            print(f"Question: {case['question']}")
+            print("Expected: " + ", ".join(case["expected_sources"]))
+            print("Retrieved:")
 
-            status = "PASS"
-        else:
-            reciprocal_rank = 0.0
-            status = "FAIL"
+            for position, (document, score) in enumerate(results, start=1):
+                print(f"  {position}. {source_name(str(document.metadata.get('source')))}"
+                      f"  (reranker score {score:.2f})")
 
-        print(f"\n[{index}] {status}")
-        print(f"Question: {question}")
-        print(
-            "Expected: "
-            + ", ".join(expected_sources)
-        )
+            if not results:
+                print("  No documents")
 
-        print("Retrieved:")
+            print(f"Expected rank: {rank if rank is not None else 'Not found'}")
+    finally:
+        index.__exit__(None, None, None)
 
-        if not retrieved_sources:
-            print("  No documents")
-        else:
-            for retrieved_rank, source in enumerate(
-                retrieved_sources,
-                start=1,
-            ):
-                print(
-                    f"  {retrieved_rank}. "
-                    f"{normalize_source(source)}"
-                )
-
-        print(
-            "Expected rank: "
-            f"{rank if rank is not None else 'Not found'}"
-        )
-
-        print(
-            f"Reciprocal rank: "
-            f"{reciprocal_rank:.3f}"
-        )
-
-    hit_rate = hits / total_questions
-    mrr = reciprocal_rank_total / total_questions
-
+    total = len(in_scope)
     print("\n" + "=" * 70)
     print("Evaluation Summary")
     print("=" * 70)
-
-    print(f"Questions: {total_questions}")
+    print(f"In-scope questions: {total}")
     print(f"Hits@{FINAL_LIMIT}: {hits}")
-    print(
-        f"Hit Rate@{FINAL_LIMIT}: "
-        f"{hit_rate:.2%}"
-    )
-    print(f"MRR: {mrr:.3f}")
+    print(f"Hit Rate@{FINAL_LIMIT}: {hits / total:.2%}")
+    print(f"MRR: {reciprocal_rank_total / total:.3f}")
 
 
 if __name__ == "__main__":

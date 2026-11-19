@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from conversation import ConversationHistory
 from llm import get_llm
+from prompt_safety import wrap_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,10 @@ def rewrite_query(
     if not messages:
         return original_question
 
-    conversation = history.format_history()
+    conversation = wrap_untrusted(
+        "conversation_history",
+        history.format_history(),
+    )
 
     system_prompt = """
 You rewrite conversational questions into standalone search queries.
