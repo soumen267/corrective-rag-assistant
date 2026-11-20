@@ -272,7 +272,7 @@ ollama pull llama3.2
 Clone the repository:
 
 ```bash
-git clone YOUR_REPOSITORY_URL
+git clone https://github.com/soumen267/corrective-rag-assistant.git
 cd rag-learning
 ```
 
