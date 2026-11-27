@@ -524,9 +524,11 @@ def upload_document(
             )
 
             # Identical content: retain the existing index and stored file.
+            # A record whose file is gone is stale, so index the upload again.
             if (
                 existing_document is not None
                 and existing_document.file_hash == file_hash
+                and Path(existing_document.stored_path).is_file()
             ):
                 existing_source = existing_document.stored_path
                 destination.unlink(missing_ok=True)
@@ -666,7 +668,8 @@ def delete_document(
     current_user: str = Depends(get_current_user),
 ) -> DocumentDeleteResponse:
     # Resolve this user's private knowledge directory.
-    data_directory = get_user_data_directory(current_user).resolve()
+    user_directory = get_user_data_directory(current_user)
+    data_directory = user_directory.resolve()
 
     # Resolve the requested path safely.
     try:
@@ -696,9 +699,13 @@ def delete_document(
             detail="Unsupported document type.",
         )
 
+    # Resolved (absolute) paths are only for the safety checks above. Chroma
+    # and the registry store the path in the form built at upload time.
+    stored_path = user_directory / requested_path.name
+
     try:
         # Remove indexed chunks before deleting the physical file.
-        delete_file_from_index(requested_path, owner_id=current_user)
+        delete_file_from_index(stored_path, owner_id=current_user)
         clear_bm25_cache(current_user)
         requested_path.unlink()
 
@@ -706,7 +713,7 @@ def delete_document(
             document_record = db.scalar(
                 select(document_models.UserDocument).where(
                     document_models.UserDocument.owner_username == current_user,
-                    document_models.UserDocument.stored_path == requested_path.as_posix(),
+                    document_models.UserDocument.stored_path == stored_path.as_posix(),
                 )
             )
             if document_record is not None:
@@ -722,6 +729,6 @@ def delete_document(
         ) from exception
 
     return DocumentDeleteResponse(
-        source=requested_path.as_posix(),
+        source=stored_path.as_posix(),
         message="Document deleted successfully.",
     )

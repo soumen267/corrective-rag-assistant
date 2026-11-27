@@ -17,10 +17,6 @@ backend to a lightweight web interface.
 
 ![Dashboard](screenshots/Dashboard.JPG)
 
-**Question answering** with source citations and reranker relevance scores:
-
-![Question answering with citations](screenshots/RAG.JPG)
-
 ## Highlights
 
 - Hybrid Chroma + BM25 retrieval

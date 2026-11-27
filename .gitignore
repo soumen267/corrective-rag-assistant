@@ -49,5 +49,4 @@ dist/
 test_auth_flow.py
 test_rag_project.py
 P0_PROGRESS.md
-tests
 docs
